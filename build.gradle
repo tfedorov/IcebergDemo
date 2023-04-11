@@ -32,6 +32,10 @@ dependencies {
     testRuntimeOnly 'org.scala-lang.modules:scala-xml_2.13:1.2.0'
 }
 
+test {
+    useJUnitPlatform()
+}
+
 application {
     // Define the main class for the application.
     mainClass = 'com.tfedorov.icebergdemo.App'

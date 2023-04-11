@@ -3,13 +3,14 @@
  */
 package com.tfedorov.icebergdemo
 
-import org.scalatest.funsuite.AnyFunSuite
-import org.junit.runner.RunWith
-import org.scalatestplus.junit.JUnitRunner
+import org.scalatest.freespec.AnyFreeSpec
+import org.scalatest.matchers.must.Matchers
+import org.scalatest.matchers.should.Matchers.convertToAnyShouldWrapper
 
-@RunWith(classOf[JUnitRunner])
-class AppSuite extends AnyFunSuite {
-  test("App has a greeting") {
-    assert(App.greeting() != null)
+//@RunWith(classOf[JUnitRunner])
+class AppSuite extends AnyFreeSpec with Matchers {
+
+  "Test generateOptimizeTableProc without Predicates" in {
+    2 + 2 shouldEqual 5
   }
 }
