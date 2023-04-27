@@ -1,6 +1,6 @@
 package com.tfedorov.icebergdemo
 
-import com.tfedorov.icebergdemo.SparkLocalExtractor.localSession
+import com.tfedorov.icebergdemo.SparkLocalExtractor.icebergSpark
 import org.apache.spark.sql.SparkSession
 import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.must.Matchers
@@ -8,18 +8,16 @@ import org.scalatest.matchers.should.Matchers.convertToAnyShouldWrapper
 
 class DemoSpec extends AnyFreeSpec with Matchers {
 
-  "2 + 2 spec" in {
-    val spark:SparkSession = localSession
+  "GIVEN iceberg catalogue WHEN created new table THEN count of row should be 0" in {
+    val spark: SparkSession = icebergSpark
     spark.sql(
-      """CREATE NAMESPACE IF NOT EXISTS harry"""
+      """CREATE NAMESPACE IF NOT EXISTS harry_ns"""
     )
     spark.sql(
-      """CREATE TABLE IF NOT EXISTS harry.integrated_table (key string, value string)
-        USING iceberg PARTITIONED BY (key)
-        LOCATION 'src/test/resources/iceberg/spark_catalog/dir/harry/integrated_table'"""
+      """CREATE TABLE IF NOT EXISTS harry_ns.integrated_table (key string, value string)
+        USING iceberg PARTITIONED BY (key)"""
     )
-
-    2 + 2 shouldBe 4
+    spark.sql("SELECT * FROM harry_ns.integrated_table").count() shouldBe 0
   }
 
 }

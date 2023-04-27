@@ -6,8 +6,15 @@
 
 # Ignore Gradle build output directory
 build
+
+/gradle/wrapper/
+/.gitattributes
+
+# Ignore iceberg warehouse
+/src/test/resources/iceberg
+
+# Ignore Idea files
 /IcebergDemo.iml
 /IcebergDemo.ipr
 /IcebergDemo.iws
-/gradle/wrapper/
-/.gitattributes
+.idea
