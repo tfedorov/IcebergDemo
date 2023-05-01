@@ -12,6 +12,7 @@ build
 
 # Ignore iceberg warehouse
 /src/test/resources/iceberg
+src/main/resources/iceberg/spark_catalog/harry_ns/integrated_table
 
 # Ignore Idea files
 /IcebergDemo.iml
