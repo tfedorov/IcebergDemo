@@ -3,6 +3,7 @@
  */
 package com.tfedorov.icebergdemo
 
+import org.apache.spark.sql.functions.lit
 import org.apache.spark.sql.{DataFrame, SparkSession}
 
 object InitAndLoadDataAPP {
@@ -13,26 +14,24 @@ object InitAndLoadDataAPP {
 
   def main(args: Array[String]): Unit = {
     println("Start" + this.getClass.getName)
-    runHarry()
+    createTableAndFill()
+    upsertData()
+    optimize()
     println("End" + this.getClass.getName)
   }
 
-  def runHarry(): Unit = {
+  private def createTableAndFill(): Unit = {
 
     val spark: SparkSession = SparkSession
       .builder()
       .master("local[*]")
       .config("spark.driver.host", "localhost")
-      //      .config("spark.driver.host", "localhost[*]")
+      // Iceberg configs
       .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
-      //      .config("spark.sql.catalog.spark_catalog", "org.apache.iceberg.spark.SparkSessionCatalog")
-      //      .config("spark.sql.catalog.spark_catalog.type", "hadoop")
-      //      .config("spark.sql.catalog.spark_catalog.warehouse", SPARK_CATALOG_PATH)
       .config("spark.sql.catalog.harry_ns", "org.apache.iceberg.spark.SparkCatalog")
       .config("spark.sql.catalog.harry_ns.type", "hadoop")
       .config("spark.sql.catalog.harry_ns.warehouse", HARRY_CATALOG_PATH)
       .config("spark.sql.warehouse.dir", WAREHOUSE_DIR_PATH)
-      // Iceberg configs
       .getOrCreate()
 
     val inputDF: DataFrame = spark.read
@@ -42,12 +41,9 @@ object InitAndLoadDataAPP {
       .csv("src/main/resources/input_data/Characters.csv")
 
     inputDF.printSchema()
-    inputDF.show
     inputDF.createGlobalTempView("input_data")
 
-//    spark.sql("""CREATE NAMESPACE IF NOT EXISTS harry_ns""")
-    spark.sql(
-      """
+    val createTableSQL = """
      CREATE TABLE IF NOT EXISTS harry_ns.input_table (Id  string,
           Name  string,
           Gender  string,
@@ -65,17 +61,65 @@ object InitAndLoadDataAPP {
           Death  string
           )
         USING iceberg PARTITIONED BY (Gender)"""
-    )
-    spark.sql("SELECT * FROM global_temp.input_data").show
+    spark.sql(createTableSQL)
 
-    //    inputDF.writeTo("harry_ns.input_table").append()
-    spark
-      .sql(
-        """
-     INSERT INTO harry_ns.input_table
-        SELECT Id,Name,Gender,Job,House,Wand,Patronus,Species,Blood_status,Hair_colour,Eye_colour,Loyalty,Skills,Birth,Death FROM global_temp.input_data
+    val insertSQL =
       """
-      )
-    spark.sql("SELECT * FROM harry_ns.input_table").show
+     INSERT INTO harry_ns.input_table
+        SELECT Id,Name,Gender,Job,House,Wand,Patronus,Species,Blood_status,Hair_colour,Eye_colour,Loyalty,Skills,Birth,Death 
+      FROM global_temp.input_data
+      """
+    spark.sql(insertSQL)
+//    spark.sql("SELECT * FROM harry_ns.input_table").show
+  }
+
+  def upsertData(): Unit = {
+    val spark: SparkSession = SparkSession
+      .builder()
+      .master("local[*]")
+      .config("spark.driver.host", "localhost")
+      // Iceberg configs
+      .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
+      .config("spark.sql.catalog.harry_ns", "org.apache.iceberg.spark.SparkCatalog")
+      .config("spark.sql.catalog.harry_ns.type", "hadoop")
+      .config("spark.sql.catalog.harry_ns.warehouse", HARRY_CATALOG_PATH)
+      .config("spark.sql.warehouse.dir", WAREHOUSE_DIR_PATH)
+      .getOrCreate()
+
+    val selectedRowDF: DataFrame = spark.sql("SELECT * FROM harry_ns.input_table WHERE id = 1")
+    val data2Upsert = selectedRowDF
+      .withColumn("id", lit("777"))
+      .union(selectedRowDF.withColumn("Hair_colour", lit("Black painted Blonde")))
+    data2Upsert.show
+    data2Upsert.createGlobalTempView("changed_data")
+
+    spark.sql(
+      """
+MERGE INTO harry_ns.input_table base USING global_temp.changed_data incr
+    ON base.id = incr.id
+WHEN MATCHED THEN
+    UPDATE SET base.Hair_colour = incr.Hair_colour
+WHEN NOT MATCHED THEN
+ INSERT (Id,Name,Gender,Job,House,Wand,Patronus,Species,Blood_status,Hair_colour,Eye_colour,Loyalty,Skills,Birth,Death)
+        VALUES(incr.Id,incr.Name,incr.Gender,incr.Job,incr.House,incr.Wand,incr.Patronus,incr.Species,incr.Blood_status,incr.Hair_colour,incr.Eye_colour,incr.Loyalty,incr.Skills,incr.Birth,incr.Death)
+      """
+    )
+    spark.sql("SELECT gender, count(*) FROM harry_ns.input_table GROUP BY gender").show
+  }
+
+  //https://iceberg.apache.org/docs/latest/spark-procedures/#remove_orphan_files
+  private def optimize(): Unit = {
+    val spark: SparkSession = SparkSession
+      .builder()
+      .master("local[*]")
+      .config("spark.driver.host", "localhost")
+      // Iceberg configs
+      .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
+      .config("spark.sql.catalog.harry_ns", "org.apache.iceberg.spark.SparkCatalog")
+      .config("spark.sql.catalog.harry_ns.type", "hadoop")
+      .config("spark.sql.catalog.harry_ns.warehouse", HARRY_CATALOG_PATH)
+      .config("spark.sql.warehouse.dir", WAREHOUSE_DIR_PATH)
+      .getOrCreate()
+    spark.sql("CALL harry_ns.system.expire_snapshots(table => 'harry_ns.input_table', retain_last => 1)").show
   }
 }
