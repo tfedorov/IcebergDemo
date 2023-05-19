@@ -22,17 +22,17 @@ repositories {
 dependencies {
     // Use Scala 2.13 in our library project
     runtimeOnly 'org.scala-lang:scala-library:2.12.15'
-    runtimeOnly 'org.scala-lang.modules:scala-collection-compat_2.12:2.8.0'
-    implementation 'org.apache.spark:spark-sql_2.12:3.2.0'
+    runtimeOnly 'org.scala-lang.modules:scala-collection-compat_2.12:2.8.1'
+    implementation 'org.apache.spark:spark-sql_2.12:3.3.2'
     implementation 'org.apache.iceberg:iceberg-core:1.2.1'
-    implementation 'org.apache.iceberg:iceberg-spark-runtime-3.2_2.12:1.2.1'
+    implementation 'org.apache.iceberg:iceberg-spark-runtime-3.3_2.12:1.2.1'
 
     // typesafe logging need to have a logback
-    implementation("ch.qos.logback:logback-classic:1.3.+")
+    implementation('ch.qos.logback:logback-classic:1.4.6')
 }
 
 
 application {
     // Define the main class for the application.
-    mainClass = 'com.tfedorov.icebergdemo.InitAndLoadDataAPP'
+    mainClass = 'com.tfedorov.icebergdemo.DemoApp'
 }
