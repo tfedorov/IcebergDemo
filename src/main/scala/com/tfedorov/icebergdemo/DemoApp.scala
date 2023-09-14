@@ -3,47 +3,40 @@
  */
 package com.tfedorov.icebergdemo
 
-import org.apache.spark.sql.functions.lit
+import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{DataFrame, SparkSession}
 
-object DemoApp {
+object DemoApp extends Logging {
 
   def main(args: Array[String]): Unit = {
-    createTableAndFill()
-    upsertData()
-    timeTravelExample("3904276079343264994")
+//    createTable()
+    initialInsert()
+//    upsertData()
+//    timeTravelExample("2640772649640991918")
+//    expireSnapshot()
+  }
 
-    //https://iceberg.apache.org/docs/latest/maintenance/
-    //    expireSnapshot()
-    //    removeOrphan()
-    //    rewriteManifests()
-    //  }
+  lazy val spark: SparkSession = SparkSession
+    .builder()
+    .master("local[*]")
+    .config("spark.driver.host", "localhost")
+    // Iceberg specific configs
+    .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
+    .config("spark.sql.catalog.harry_ns", "org.apache.iceberg.spark.SparkCatalog")
+    // • HadoopCatalog supports tables that are stored in HDFS or your local file system.
+    // • HiveCatalog uses a Hive Metastore to keep track of your Iceberg table by storing a reference to the latest metadata file.
+    .config("spark.sql.catalog.harry_ns.type", "hadoop")
+    .config("spark.sql.catalog.harry_ns.warehouse", "src/main/resources/output_iceberg/catalog/harry_ns/")
+    .config("spark.sql.warehouse.dir", "src/main/resources/output_iceberg")
+    .getOrCreate()
 
-    lazy val spark: SparkSession = SparkSession
-      .builder()
-      .master("local[*]")
-      .config("spark.driver.host", "localhost")
-      // Iceberg specific configs
-      .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
-      .config("spark.sql.catalog.harry_ns", "org.apache.iceberg.spark.SparkCatalog")
-      .config("spark.sql.catalog.harry_ns.type", "hadoop")
-      .config("spark.sql.catalog.harry_ns.warehouse", "src/main/resources/output_iceberg/catalog/harry_ns/")
-      .config("spark.sql.warehouse.dir", "src/main/resources/output_iceberg")
-      .getOrCreate()
+  /**
+    * Create an Iceberg table
+    */
+  def createTable(): Unit = {
 
-    def createTableAndFill(): Unit = {
-
-      val inputDF: DataFrame = spark.read
-        .option("delimiter", ";")
-        .option("inferSchema", "true")
-        .option("header", "true")
-        .csv("src/main/resources/input_data/Characters.csv")
-
-      inputDF.printSchema()
-      inputDF.createGlobalTempView("input_data")
-
-      val createTableSQL =
-        """
+    val createTableSQL =
+      """
      CREATE TABLE IF NOT EXISTS harry_ns.input_table (Id  string,
           Name  string,
           Gender  string,
@@ -62,104 +55,146 @@ object DemoApp {
           )
         USING iceberg
         PARTITIONED BY (Gender)
+        TBLPROPERTIES ('write.metadata.delete-after-commit.enabled' = 'true', 'write.metadata.previous-versions-max' = '0')
         """
-      //TBLPROPERTIES ('write.metadata.delete-after-commit.enabled' = 'true', 'write.metadata.previous-versions-max' = '1')
-      spark.sql(createTableSQL)
+    //TBLPROPERTIES ('write.metadata.delete-after-commit.enabled' = 'true', 'write.metadata.previous-versions-max' = '1')
+    spark.sql(createTableSQL)
 
-      val insertSQL =
-        """
+    log.info("Snapshots after creation")
+    spark.sql("SELECT * FROM harry_ns.input_table.snapshots").show
+
+  }
+
+  /**
+    * Read input data Harry Potter from semicolon separated file
+    * Fill the Iceberg table by
+    */
+  def initialInsert(): Unit = {
+
+    val inputDF: DataFrame = spark.read
+    // .option("delimiter", ";")
+      .option("inferSchema", "true")
+      .option("header", "true")
+      .option("multiLine", "true")
+      //.csv("src/main/resources/input_data/CharactersOriginal.ssv")
+      .csv("src/main/resources/input_data/Characters.csv")
+
+    inputDF.printSchema()
+
+    inputDF.createGlobalTempView("input_data")
+
+    val insertSQL =
+      """
      INSERT INTO harry_ns.input_table
         SELECT Id,Name,Gender,Job,House,Wand,Patronus,Species,Blood_status,Hair_colour,Eye_colour,Loyalty,Skills,Birth,Death
       FROM global_temp.input_data
       """
-      spark.sql(insertSQL)
+    spark.sql(insertSQL)
 
-    }
+    log.info("Snapshots after insert")
+    spark.sql("SELECT * FROM harry_ns.input_table.snapshots").show
+    log.info("Files after insert")
+    spark
+      .sql("SELECT file_path,file_format,partition,record_count,null_value_counts FROM harry_ns.input_table.files")
+      .show
+  }
 
-    def upsertData(): Unit = {
+  def upsertData(): Unit = {
 
-      val selectedRowDF: DataFrame = spark.sql("SELECT * FROM harry_ns.input_table WHERE id = 1")
-      val data2Upsert = selectedRowDF
-        .withColumn("id", lit("777"))
-        .union(selectedRowDF.withColumn("Hair_colour", lit("Black painted Blonde")))
-      data2Upsert.show
-      data2Upsert.createGlobalTempView("changed_data")
-
+    val selectedRowDF: DataFrame =
       spark.sql(
         """
+SELECT
+  1 as Id,
+ 'Harry James Potter' AS  Name,
+  'Male' AS Gender,
+  'Student' AS Job,
+  'Gryffindor' AS House,
+  'Holly  phoenix feather' AS Wand,
+  'Stag' AS Patronus,
+  'Human' AS Species,
+  'II+' AS Blood_status,
+  'blondie' AS Hair_colour,
+  'Bright green' AS Eye_colour,
+  'Albus Dumbledore' AS Loyalty,
+  'Parseltongue' AS Skills,
+  '31 July 1980' AS Birth,
+  '' AS Death
+"""
+      )
+    selectedRowDF.show
+    selectedRowDF.createGlobalTempView("changed_data")
+
+    spark.sql(
+      """
 MERGE INTO harry_ns.input_table base USING global_temp.changed_data incr
     ON base.id = incr.id
 WHEN MATCHED THEN
     UPDATE SET base.Hair_colour = incr.Hair_colour
-WHEN NOT MATCHED THEN
- INSERT (Id,Name,Gender,Job,House,Wand,Patronus,Species,Blood_status,Hair_colour,Eye_colour,Loyalty,Skills,Birth,Death)
-        VALUES(incr.Id,incr.Name,incr.Gender,incr.Job,incr.House,incr.Wand,incr.Patronus,incr.Species,incr.Blood_status,incr.Hair_colour,incr.Eye_colour,incr.Loyalty,incr.Skills,incr.Birth,incr.Death)
-      """
-      )
-      spark.sql("SELECT gender, count(*) FROM harry_ns.input_table GROUP BY gender").show
-    }
+ """
+    )
+    spark.sql("SELECT gender, count(*) FROM harry_ns.input_table GROUP BY gender").show
 
-    def timeTravelExample(snapshotVersion: String): Unit = {
-      spark.sql("SELECT * FROM harry_ns.input_table.snapshots").show
-      spark.sql("SELECT id, gender, name, Hair_colour FROM harry_ns.input_table WHERE id in (1,777)").show
-      spark.sql("SELECT * FROM harry_ns.input_table.snapshots").show
-      spark
-        .sql(
-          s"""
+    log.info("Harries after upsert")
+    spark.sql("SELECT * FROM harry_ns.input_table where name like 'Harry%'").show
+    log.info("Snapshots after upsert")
+    spark.sql("SELECT * FROM harry_ns.input_table.snapshots").show
+    log.info("Files after upsert")
+    spark
+      .sql("SELECT file_path,file_format,partition,record_count,null_value_counts FROM harry_ns.input_table.files")
+      .show
+  }
+
+  def timeTravelExample(snapshotVersion: String): Unit = {
+    log.info("1,777 in current snapshot")
+    spark.sql("SELECT id, gender, name, Hair_colour FROM harry_ns.input_table WHERE id in (1)").show
+
+    log.info("1,777 in snapshot" + snapshotVersion)
+    spark
+      .sql(
+        s"""
         SELECT id, gender, name, Hair_colour 
         FROM harry_ns.input_table VERSION AS OF $snapshotVersion
-        WHERE id in (1,777)"""
-        )
-        .show
+        WHERE id in (1)"""
+      )
+      .show
 
-      spark
-        .sql(
-          s"""
+    log.info("Ids not present in previous snapshot")
+    spark
+      .sql(
+        s"""
         SELECT id, gender, name, Hair_colour
         FROM harry_ns.input_table
         WHERE id not in ( SELECT id  FROM harry_ns.input_table VERSION AS OF $snapshotVersion)"""
-        )
-        .show
-    }
+      )
+      .show
 
-    //https://iceberg.apache.org/docs/latest/spark-procedures/#remove_orphan_files
-    def expireSnapshot(): Unit = {
-      spark.sql("SELECT * FROM harry_ns.input_table.snapshots").show
-      spark
-        .sql(
-          """
+  }
+
+  //https://iceberg.apache.org/docs/latest/spark-procedures/#remove_orphan_files
+  def expireSnapshot(): Unit = {
+    log.info("Snapshots before clearing")
+    spark.sql("SELECT * FROM harry_ns.input_table.snapshots").show
+    spark
+      .sql(
+        """
         CALL harry_ns.system.expire_snapshots(
           table => 'harry_ns.input_table'
           , older_than => TIMESTAMP 'now'
           , retain_last => 1
         )"""
-        )
-        .show
-      spark.sql("SELECT * FROM harry_ns.input_table.snapshots").show
-    }
+      )
+      .show
 
-    def removeOrphan(): Unit = {
-      spark.sql("SELECT * FROM harry_ns.input_table.files").show
-      spark
-        .sql(
-          """
-        CALL harry_ns.system.remove_orphan_files(
-          table => 'harry_ns.input_table'
-          , dry_run => true
-        )"""
-        )
-        .show
-      spark.sql("SELECT * FROM harry_ns.input_table.files").show
-    }
+    log.info("Snapshots after clearing")
+    spark.sql("SELECT * FROM harry_ns.input_table.snapshots").show
 
-    def rewriteManifests(): Unit = {
-      spark.sql("SELECT * FROM harry_ns.input_table.manifests").show
-      spark
-        .sql("CALL harry_ns.system.rewrite_manifests('harry_ns.input_table')")
-        //.sql("CALL harry_ns.system.rewrite_data_files('harry_ns.input_table')")
-        .show
-      spark.sql("SELECT * FROM harry_ns.input_table.manifests").show
-
-    }
+//    spark.sql("SELECT * FROM harry_ns.input_table.manifests").show
+//    spark
+//      .sql("CALL harry_ns.system.rewrite_manifests('harry_ns.input_table')")
+//      //.sql("CALL harry_ns.system.rewrite_data_files('harry_ns.input_table')")
+//      .show
+//    spark.sql("SELECT * FROM harry_ns.input_table.manifests").show
   }
+
 }

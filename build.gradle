@@ -20,7 +20,6 @@ repositories {
 }
 
 dependencies {
-    // Use Scala 2.13 in our library project
     runtimeOnly 'org.scala-lang:scala-library:2.12.15'
     runtimeOnly 'org.scala-lang.modules:scala-collection-compat_2.12:2.8.1'
     implementation 'org.apache.spark:spark-sql_2.12:3.3.2'
