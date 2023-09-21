@@ -10,10 +10,10 @@ object DemoApp extends Logging {
 
   def main(args: Array[String]): Unit = {
 //    createTable()
-    initialInsert()
+//    initialInsert()
 //    upsertData()
-//    timeTravelExample("2640772649640991918")
-//    expireSnapshot()
+//    timeTravelExample("9012482816857431895")
+    expireSnapshot()
   }
 
   lazy val spark: SparkSession = SparkSession
@@ -42,7 +42,6 @@ object DemoApp extends Logging {
           Gender  string,
           Job  string,
           House  string,
-          Wand  string,
           Patronus  string,
           Species  string,
           Blood_status  string,
@@ -50,12 +49,10 @@ object DemoApp extends Logging {
           Eye_colour  string,
           Loyalty  string,
           Skills  string,
-          Birth  string,
-          Death  string
+          Birth  string
           )
         USING iceberg
-        PARTITIONED BY (Gender)
-        TBLPROPERTIES ('write.metadata.delete-after-commit.enabled' = 'true', 'write.metadata.previous-versions-max' = '0')
+        PARTITIONED BY (House)
         """
     //TBLPROPERTIES ('write.metadata.delete-after-commit.enabled' = 'true', 'write.metadata.previous-versions-max' = '1')
     spark.sql(createTableSQL)
@@ -72,11 +69,9 @@ object DemoApp extends Logging {
   def initialInsert(): Unit = {
 
     val inputDF: DataFrame = spark.read
-    // .option("delimiter", ";")
       .option("inferSchema", "true")
       .option("header", "true")
       .option("multiLine", "true")
-      //.csv("src/main/resources/input_data/CharactersOriginal.ssv")
       .csv("src/main/resources/input_data/Characters.csv")
 
     inputDF.printSchema()
@@ -86,13 +81,17 @@ object DemoApp extends Logging {
     val insertSQL =
       """
      INSERT INTO harry_ns.input_table
-        SELECT Id,Name,Gender,Job,House,Wand,Patronus,Species,Blood_status,Hair_colour,Eye_colour,Loyalty,Skills,Birth,Death
+        SELECT Id,Name,Gender,Job,House,Patronus,Species,Blood_status,Hair_colour,Eye_colour,Loyalty,Skills,Birth
       FROM global_temp.input_data
       """
     spark.sql(insertSQL)
 
+    log.info("Data after insert")
+    spark.sql("SELECT * FROM harry_ns.input_table order by id").show(3)
+
     log.info("Snapshots after insert")
-    spark.sql("SELECT * FROM harry_ns.input_table.snapshots").show
+    spark.sql("SELECT * FROM harry_ns.input_table.snapshots").show(100)
+
     log.info("Files after insert")
     spark
       .sql("SELECT file_path,file_format,partition,record_count,null_value_counts FROM harry_ns.input_table.files")
@@ -101,42 +100,33 @@ object DemoApp extends Logging {
 
   def upsertData(): Unit = {
 
-    val selectedRowDF: DataFrame =
+    val changedDataDF: DataFrame =
       spark.sql(
         """
 SELECT
-  1 as Id,
- 'Harry James Potter' AS  Name,
-  'Male' AS Gender,
-  'Student' AS Job,
+   1 as Id,
+  'Harry James Potter' AS  Name,
   'Gryffindor' AS House,
-  'Holly  phoenix feather' AS Wand,
-  'Stag' AS Patronus,
-  'Human' AS Species,
   'II+' AS Blood_status,
-  'blondie' AS Hair_colour,
-  'Bright green' AS Eye_colour,
-  'Albus Dumbledore' AS Loyalty,
-  'Parseltongue' AS Skills,
-  '31 July 1980' AS Birth,
-  '' AS Death
+  'blondie' AS Hair_colour
 """
       )
-    selectedRowDF.show
-    selectedRowDF.createGlobalTempView("changed_data")
+    log.info("Delta files")
+    changedDataDF.show
+    changedDataDF.createGlobalTempView("delta")
 
     spark.sql(
       """
-MERGE INTO harry_ns.input_table base USING global_temp.changed_data incr
+MERGE INTO harry_ns.input_table base USING global_temp.delta incr
     ON base.id = incr.id
 WHEN MATCHED THEN
-    UPDATE SET base.Hair_colour = incr.Hair_colour
+    UPDATE SET base.Hair_colour = incr.Hair_colour, base.Blood_status = incr.Blood_status
  """
     )
-    spark.sql("SELECT gender, count(*) FROM harry_ns.input_table GROUP BY gender").show
 
-    log.info("Harries after upsert")
-    spark.sql("SELECT * FROM harry_ns.input_table where name like 'Harry%'").show
+    log.info("Data after upsert")
+    spark.sql("SELECT * FROM harry_ns.input_table order by id").show(3)
+
     log.info("Snapshots after upsert")
     spark.sql("SELECT * FROM harry_ns.input_table.snapshots").show
     log.info("Files after upsert")
@@ -146,28 +136,31 @@ WHEN MATCHED THEN
   }
 
   def timeTravelExample(snapshotVersion: String): Unit = {
-    log.info("1,777 in current snapshot")
-    spark.sql("SELECT id, gender, name, Hair_colour FROM harry_ns.input_table WHERE id in (1)").show
 
-    log.info("1,777 in snapshot" + snapshotVersion)
+    spark.sql("SELECT * FROM harry_ns.input_table.snapshots").show
+    log.info("Select SQL - from T0. " + snapshotVersion)
     spark
       .sql(
         s"""
         SELECT id, gender, name, Hair_colour 
         FROM harry_ns.input_table VERSION AS OF $snapshotVersion
-        WHERE id in (1)"""
+        ORDER BY id"""
       )
-      .show
+      .show(3)
 
-    log.info("Ids not present in previous snapshot")
+    log.info("Select SQL - changes T0 & T1")
     spark
       .sql(
         s"""
-        SELECT id, gender, name, Hair_colour
-        FROM harry_ns.input_table
-        WHERE id not in ( SELECT id  FROM harry_ns.input_table VERSION AS OF $snapshotVersion)"""
+        SELECT *
+        FROM harry_ns.input_table as t1
+        JOIN ( SELECT *  FROM harry_ns.input_table VERSION AS OF $snapshotVersion) as t0
+        ON t1.id = t0.id
+        WHERE t1.Hair_colour <> t0.Hair_colour
+        ORDER BY t1.id
+        """
       )
-      .show
+      .show(3)
 
   }
 
@@ -190,6 +183,7 @@ WHEN MATCHED THEN
     spark.sql("SELECT * FROM harry_ns.input_table.snapshots").show
 
 //    spark.sql("SELECT * FROM harry_ns.input_table.manifests").show
+//    spark.sql("SELECT * FROM harry_ns.input_table.files").show
 //    spark
 //      .sql("CALL harry_ns.system.rewrite_manifests('harry_ns.input_table')")
 //      //.sql("CALL harry_ns.system.rewrite_data_files('harry_ns.input_table')")
