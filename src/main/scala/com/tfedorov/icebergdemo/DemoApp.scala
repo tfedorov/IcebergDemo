@@ -9,10 +9,10 @@ import org.apache.spark.sql.{DataFrame, SparkSession}
 object DemoApp extends Logging {
 
   def main(args: Array[String]): Unit = {
-//    createTable()
-//    initialInsert()
-//    upsertData()
-//    timeTravelExample("9012482816857431895")
+    createTable()
+    initialInsert()
+    upsertData()
+    timeTravelExample("5726920924496665784")
     expireSnapshot()
   }
 
@@ -40,16 +40,9 @@ object DemoApp extends Logging {
      CREATE TABLE IF NOT EXISTS harry_ns.input_table (Id  string,
           Name  string,
           Gender  string,
-          Job  string,
           House  string,
-          Patronus  string,
-          Species  string,
           Blood_status  string,
-          Hair_colour  string,
-          Eye_colour  string,
-          Loyalty  string,
-          Skills  string,
-          Birth  string
+          Hair_colour  string
           )
         USING iceberg
         PARTITIONED BY (House)
@@ -81,7 +74,7 @@ object DemoApp extends Logging {
     val insertSQL =
       """
      INSERT INTO harry_ns.input_table
-        SELECT Id,Name,Gender,Job,House,Patronus,Species,Blood_status,Hair_colour,Eye_colour,Loyalty,Skills,Birth
+        SELECT Id,Name,Gender,House,Blood_status,Hair_colour
       FROM global_temp.input_data
       """
     spark.sql(insertSQL)
@@ -106,6 +99,7 @@ object DemoApp extends Logging {
 SELECT
    1 as Id,
   'Harry James Potter' AS  Name,
+  'Male' AS Gender,
   'Gryffindor' AS House,
   'II+' AS Blood_status,
   'blondie' AS Hair_colour
