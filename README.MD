@@ -1,5 +1,7 @@
 # IcebergDemo Project
 
+Slideshare presentation [Harry Potter & Apache iceberg format](https://www.slideshare.net/TarasFedorov/harry-potter-apache-iceberg-formatpptx).
+
 This is a simple standalone Scala application that demonstrates working
 with [Apache Iceberg](https://iceberg.apache.org/).
 
