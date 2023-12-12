@@ -6,12 +6,14 @@ import org.apache.spark.sql.{DataFrame, SparkSession}
 object DemoApp extends Logging {
 
   def main(args: Array[String]): Unit = {
-//    createTable()
-//    initialInsert()
-//    upsertData()
-    timeTravelExample("'2023-11-21 12:38:48.746'")
-//    expireSnapshot()
-//    rewriteMore()
+    createTable()
+    initialInsert()
+    checkRawParquets()
+    upsertData()
+    checkRawParquets()
+    timeTravelExample("8472915270827124666")
+    expireSnapshot()
+    rewriteMore()
   }
 
   lazy val spark: SparkSession = SparkSession
@@ -19,7 +21,6 @@ object DemoApp extends Logging {
     .master("local[*]")
     .config("spark.driver.host", "localhost")
     // Iceberg specific configs
-    //
     .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
     .config("spark.sql.catalog.harry_ns", "org.apache.iceberg.spark.SparkCatalog")
     // • HadoopCatalog supports tables that are stored in HDFS or your local file system.
@@ -83,8 +84,6 @@ object DemoApp extends Logging {
 
     log.info("Snapshots after insert")
     spark.sql("SELECT * FROM harry_ns.input_table.snapshots").show()
-    spark.sql("SELECT * FROM harry_ns.input_table.snapshots").collect().foreach(println)
-
   }
 
   def upsertData(): Unit = {
@@ -93,7 +92,7 @@ object DemoApp extends Logging {
       spark.sql(
         """
 SELECT
-   2 as Id,
+   1 as Id,
   'Harry James Potter' AS  Name,
   'Male' AS Gender,
   'Gryffindor' AS House,
@@ -125,8 +124,16 @@ WHEN MATCHED THEN
       .show
   }
 
+  def checkRawParquets(): Unit = {
+    log.info("Reading raw parquet: src/main/resources/warehouse/catalog/harry_ns/input_table/data")
+    spark.read
+      .parquet("src/main/resources/warehouse/catalog/harry_ns/input_table/data")
+      .orderBy("id")
+      .limit(3)
+      .show
+  }
+
   def timeTravelExample(snapshotVersion: String): Unit = {
-//841066447475073011
     spark.sql("SELECT * FROM harry_ns.input_table.snapshots").show
     log.info("Select SQL - from T0. " + snapshotVersion)
     spark
@@ -143,11 +150,11 @@ WHEN MATCHED THEN
       .sql(
         s"""
         SELECT *
-        FROM harry_ns.input_table as t1
-        JOIN ( SELECT *  FROM harry_ns.input_table VERSION AS OF $snapshotVersion) as t0
-        ON t1.id = t0.id
-        WHERE t1.Hair_colour <> t0.Hair_colour
-        ORDER BY t1.id
+        FROM harry_ns.input_table as t2
+        JOIN ( SELECT *  FROM harry_ns.input_table VERSION AS OF $snapshotVersion) as t1
+        ON t2.id = t1.id
+        WHERE t2.Hair_colour <> t1.Hair_colour
+        ORDER BY t2.id
         """
       )
       .show(3)
